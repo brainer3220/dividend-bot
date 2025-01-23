@@ -63,7 +63,6 @@ def main():
 
     filtered_stocks.sort(key=lambda x: x['Dividend_Yield_Value'], reverse=True)
 
-    # 메시지 생성
     message = f"[{today}] 배당락일 고배당 종목 ({len(filtered_stocks)}건)\n\n"
     for idx, stock in enumerate(filtered_stocks, 1):
         message += (
@@ -74,7 +73,6 @@ def main():
             f"  ∙ 지급일: {stock['Payment Date']}\n\n"
         )
 
-    # Telegram 전송
     if not send_telegram(message):
         sys.exit(1)
 
