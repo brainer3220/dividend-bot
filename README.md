@@ -2,7 +2,7 @@
 
 주식 배당락일 고배당 종목을 매일 아침 텔레그램 채널로 알려주는 자동화 봇
 
-[![GitHub Actions](https://github.com/brainer3220/dividend-bot/actions/workflows/dividend.yml/badge.svg)](https://github.com/your-username/dividend-bot/actions)
+[![GitHub Actions](https://github.com/brainer3220/dividend-bot/actions/workflows/dividend.yml/badge.svg)](https://github.com/brainer3220/dividend-bot/actions)
 
 ## ✨ 주요 기능
 - NASDAQ 공식 배당 캘린더 API 사용
@@ -19,6 +19,6 @@
 
 ### 2. 설치
 ```bash
-git clone https://github.com/your-username/dividend-bot.git
+git clone https://github.com/brainer3220/dividend-bot.git
 cd dividend-bot
 pip install -r requirements.txt
