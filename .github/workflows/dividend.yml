@@ -20,7 +20,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install requests yfinance python-dotenv
+        pip install -r requirements.txt  # ← requirements.txt 사용
 
     - name: Run script
       env:
