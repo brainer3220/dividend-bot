@@ -44,7 +44,15 @@ def main():
                 annual_dividend = float(stock['indicated_Annual_Dividend'])
                 
                 ticker = stock['symbol']
-                price = yf.Ticker(ticker).history(period='1d').iloc[-1].Close
+                
+                # 주가 데이터 가져오기
+                ticker_info = yf.Ticker(ticker)
+                hist = ticker_info.history(period='1d')
+                if hist.empty:
+                    print(f"No price data for {ticker}, skipping.")
+                    continue
+                price = hist.iloc[-1].Close
+                
                 dividend_yield = (annual_dividend / price) * 100 if price else 0
                 
                 if dividend_yield >= 3:
@@ -63,18 +71,31 @@ def main():
 
     filtered_stocks.sort(key=lambda x: x['Dividend_Yield_Value'], reverse=True)
 
-    message = f"[{today}] 배당락일 고배당 종목 ({len(filtered_stocks)}건)\n\n"
-    for idx, stock in enumerate(filtered_stocks, 1):
-        message += (
-            f"[{idx}] {stock['Symbol']} ({stock['Name']})\n"
-            f"  ∙ 배당락일: {stock['Ex-Date']}\n"
-            f"  ∙ 배당금: ${stock['Dividend']} (연간 ${stock['Annual Dividend']})\n"
-            f"  ∙ 배당 수익률: {stock['Dividend Yield']}\n"
-            f"  ∙ 지급일: {stock['Payment Date']}\n\n"
-        )
+    if not filtered_stocks:
+        print("No stocks to send.")
+        return
 
-    if not send_telegram(message):
-        sys.exit(1)
+    chunk_size = 15  # Adjust this based on message length
+    total_stocks = len(filtered_stocks)
+    total_parts = (total_stocks + chunk_size - 1) // chunk_size
+
+    for part in range(total_parts):
+        start = part * chunk_size
+        end = start + chunk_size
+        current_chunk = filtered_stocks[start:end]
+        part_num = part + 1
+        message = f"[{today}] 배당락일 고배당 종목 ({total_stocks}건) Part {part_num}/{total_parts}\n\n"
+        for idx, stock in enumerate(current_chunk, start=1):
+            global_idx = start + idx
+            message += (
+                f"[{global_idx}] {stock['Symbol']} ({stock['Name']})\n"
+                f"  ∙ 배당락일: {stock['Ex-Date']}\n"
+                f"  ∙ 배당금: ${stock['Dividend']} (연간 ${stock['Annual Dividend']})\n"
+                f"  ∙ 배당 수익률: {stock['Dividend Yield']}\n"
+                f"  ∙ 지급일: {stock['Payment Date']}\n\n"
+            )
+        if not send_telegram(message):
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
