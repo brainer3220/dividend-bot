@@ -109,9 +109,9 @@ def process_stock(stock, current_date):
             price = hist.Close.dropna().iloc[-1]
         
         market_cap = ticker_info.info.get('marketCap', 0)
-        if market_cap < 1e9:  # 10억 달러 이상
-            logging.info(f"시가총액 부족: {ticker} ({market_cap/1e9:.2f}B)")
-            return None
+        # if market_cap < 1e9:  # 10억 달러 이상
+        #     logging.info(f"시가총액 부족: {ticker} ({market_cap/1e9:.2f}B)")
+        #     return None
 
         # 배당 수익률 계산
         dividend_rate = float(stock['dividend_Rate'])
