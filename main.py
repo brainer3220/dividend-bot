@@ -25,7 +25,6 @@ logging.basicConfig(
     ]
 )
 
-# 시간대 설정
 EASTERN_TZ = pytz.timezone('US/Eastern')
 
 def send_telegram(message):
@@ -44,9 +43,9 @@ def send_telegram(message):
         logging.error(f"Telegram 전송 실패: {str(e)}")
         return False
 
-def fetch_nasdaq_data(date):
-    """NASDAQ 배당 데이터 조회"""
-    url = f'https://api.nasdaq.com/api/calendar/dividends?date={date}'
+def fetch_nasdaq_data(target_date):
+    """NASDAQ 배당 데이터 조회 (2영업일 후 기준)"""
+    url = f'https://api.nasdaq.com/api/calendar/dividends?date={target_date}'
     headers = {
         'accept': 'application/json, text/plain, */*',
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Safari/537.36',
@@ -65,14 +64,14 @@ def fetch_nasdaq_data(date):
         logging.error(f"NASDAQ API 요청 실패: {str(e)}")
         return None
 
-def calculate_cutoff_date(ex_date):
-    """배당락일 기준 2영업일 전 날짜 계산"""
+def calculate_target_date():
+    """2영업일 후 날짜 계산"""
     try:
-        ex_date = pd.to_datetime(ex_date)
-        cutoff_date = ex_date - pd.offsets.BusinessDay(2)
-        return cutoff_date.date()
+        now_et = datetime.now(EASTERN_TZ)
+        target_date = now_et + pd.offsets.BusinessDay(2)
+        return target_date.strftime('%Y-%m-%d')
     except Exception as e:
-        logging.error(f"날짜 계산 오류: {str(e)}")
+        logging.error(f"목표일 계산 오류: {str(e)}")
         return None
 
 def process_stock(stock, current_date):
@@ -85,12 +84,12 @@ def process_stock(stock, current_date):
             logging.warning(f"필수 데이터 누락: {stock.get('symbol')}")
             return None
 
-        # 배당락일 파싱 (다양한 날짜 형식 지원)
+        # 배당락일 파싱
         ex_date_str = stock['dividend_Ex_Date']
         ex_date = pd.to_datetime(ex_date_str).date()
-        cutoff_date = calculate_cutoff_date(ex_date)
         
-        if not cutoff_date or current_date > cutoff_date:
+        # 현재 날짜와 비교 (2영업일 후 기준)
+        if ex_date <= current_date:
             logging.info(f"제외: {stock['symbol']} (배당락일 {ex_date_str} 기준 구매기한 종료)")
             return None
 
@@ -103,7 +102,7 @@ def process_stock(stock, current_date):
             logging.warning(f"주가 데이터 없음: {ticker}")
             return None
             
-        # 주가 데이터 처리
+        # 주가 처리
         price = hist.iloc[-1].Close
         if pd.isna(price):
             price = hist.Close.dropna().iloc[-1]
@@ -117,8 +116,7 @@ def process_stock(stock, current_date):
             return {
                 'Symbol': ticker,
                 'Name': stock['companyName'],
-                'Ex-Date': ex_date.strftime('%Y-%m-%d'),  # 표준 형식으로 통일
-                'Cutoff-Date': cutoff_date.strftime('%Y-%m-%d'),
+                'Ex-Date': ex_date.strftime('%Y-%m-%d'),
                 'Dividend': dividend_rate,
                 'Annual Dividend': annual_dividend,
                 'Dividend Yield': f"{dividend_yield:.2f}%",
@@ -133,13 +131,18 @@ def process_stock(stock, current_date):
 
 def main():
     try:
-        # 현재 동부시간 기준 날짜
+        # 현재 동부시간 기준
         now_et = datetime.now(EASTERN_TZ)
-        today_et = now_et.strftime('%Y-%m-%d')
         current_date = now_et.date()
+        current_time_str = now_et.strftime('%Y-%m-%d %H:%M')
+        
+        # 2영업일 후 날짜 계산
+        target_date = calculate_target_date()
+        if not target_date:
+            raise ValueError("목표일 계산 실패")
 
         # NASDAQ 데이터 조회
-        data = fetch_nasdaq_data(today_et)
+        data = fetch_nasdaq_data(target_date)
         if not data or not data.get('data'):
             logging.warning("배당 데이터를 가져오지 못했습니다.")
             return
@@ -169,17 +172,18 @@ def main():
             part_num = part + 1
             
             message = (
-                f"<b>[{today_et}] 미국주식 고배당 종목 알림 ({total_stocks}건)</b>\n"
-                f"※ 동부시간 기준 {now_et.strftime('%Y-%m-%d %H:%M')}\n"
-                f"※ 최종 매수 기한: 배당락일 2영업일 전까지\n\n"
+                f"<b>[{target_date}] 미국주식 고배당 종목 알림 ({total_stocks}건)</b>\n"
+                f"※ 동부시간 기준 {current_time_str}\n"
+                f"※ 최종 매수 기한: 배당락일 당일 00:00 ET 기준\n\n"
             )
             
             for idx, stock in enumerate(current_chunk, 1):
                 global_idx = start + idx
+                cutoff_date = (pd.to_datetime(stock['Ex-Date']) - pd.offsets.BusinessDay(2)).strftime('%Y-%m-%d')
                 message += (
                     f"<b>{global_idx}. {stock['Symbol']}</b> ({stock['Name']})\n"
                     f"├ 배당락일: {stock['Ex-Date']}\n"
-                    f"├ 최종 매수일: {stock['Cutoff-Date']}\n"
+                    f"├ 최종 매수일: {cutoff_date}\n"
                     f"├ 현재 가격: {stock['Current Price']}\n"
                     f"├ 배당 수익률: {stock['Dividend Yield']}\n"
                     f"├ 배당금: ${stock['Dividend']} (연간 ${stock['Annual Dividend']})\n"
