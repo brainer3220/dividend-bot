@@ -49,7 +49,7 @@ def fetch_nasdaq_data(date):
     url = f'https://api.nasdaq.com/api/calendar/dividends?date={date}'
     headers = {
         'accept': 'application/json, text/plain, */*',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Safari/537.36',
+        'user-agent': 'Mozilla/5.0',
         'referer': 'https://www.nasdaq.com/'
     }
 
@@ -65,12 +65,22 @@ def fetch_nasdaq_data(date):
         logging.error(f"NASDAQ API 요청 실패: {str(e)}")
         return None
 
+def parse_date(date_str):
+    """날짜 문자열 파싱 함수"""
+    for fmt in ('%Y-%m-%d', '%m/%d/%Y'):
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+    logging.error(f"날짜 형식 오류: {date_str}")
+    return None
+
 def calculate_cutoff_date(ex_date):
     """배당락일 기준 2영업일 전 날짜 계산"""
     try:
-        ex_date = pd.to_datetime(ex_date)
-        cutoff_date = ex_date - pd.offsets.BusinessDay(2)
-        return cutoff_date.date()
+        us_bd = pd.offsets.CustomBusinessDay(calendar=pd.tseries.holiday.USFederalHolidayCalendar())
+        cutoff_date = ex_date - us_bd * 2
+        return cutoff_date
     except Exception as e:
         logging.error(f"날짜 계산 오류: {str(e)}")
         return None
@@ -85,12 +95,14 @@ def process_stock(stock, current_date):
             logging.warning(f"필수 데이터 누락: {stock.get('symbol')}")
             return None
 
-        # 배당락일 유효성 검사
+        # 배당락일 파싱
         ex_date_str = stock['dividend_Ex_Date']
-        ex_date = datetime.strptime(ex_date_str, '%Y-%m-%d').date()
+        ex_date = parse_date(ex_date_str)
+        if not ex_date:
+            return None
+
         cutoff_date = calculate_cutoff_date(ex_date)
-        
-        if not cutoff_date or current_date > cutoff_date:
+        if not cutoff_date or current_date > cutoff_date.date():
             logging.info(f"제외: {stock['symbol']} (배당락일 {ex_date_str} 기준 구매기한 종료)")
             return None
 
@@ -98,31 +110,29 @@ def process_stock(stock, current_date):
         ticker = stock['symbol']
         ticker_info = yf.Ticker(ticker)
         hist = ticker_info.history(period='5d')
-        
+
         if hist.empty:
             logging.warning(f"주가 데이터 없음: {ticker}")
             return None
-            
-        # 주가 및 시가총액
+
+        # 주가 추출
         price = hist.iloc[-1].Close
         if pd.isna(price):
             price = hist.Close.dropna().iloc[-1]
-        
-        market_cap = ticker_info.info.get('marketCap', 0)
-        # if market_cap < 1e9:  # 10억 달러 이상
-        #     logging.info(f"시가총액 부족: {ticker} ({market_cap/1e9:.2f}B)")
-        #     return None
 
         # 배당 수익률 계산
         dividend_rate = float(stock['dividend_Rate'])
         annual_dividend = float(stock['indicated_Annual_Dividend'])
-        dividend_yield = (annual_dividend / price) * 100 if price else 0
+        if price > 0:
+            dividend_yield = (annual_dividend / price) * 100
+        else:
+            dividend_yield = 0
 
         if dividend_yield >= 3:
             return {
                 'Symbol': ticker,
                 'Name': stock['companyName'],
-                'Ex-Date': ex_date_str,
+                'Ex-Date': ex_date.strftime('%Y-%m-%d'),
                 'Cutoff-Date': cutoff_date.strftime('%Y-%m-%d'),
                 'Dividend': dividend_rate,
                 'Annual Dividend': annual_dividend,
@@ -130,9 +140,8 @@ def process_stock(stock, current_date):
                 'Dividend_Yield_Value': dividend_yield,
                 'Payment Date': stock['payment_Date'],
                 'Current Price': f"${price:.2f}",
-                'Market Cap': f"${market_cap/1e9:.2f}B"
+                # 'Market Cap': f"${market_cap/1e9:.2f}B"  # 시가총액 정보 제거
             }
-            
     except Exception as e:
         logging.error(f"종목 처리 오류 {stock.get('symbol')}: {str(e)}")
     return None
@@ -173,13 +182,13 @@ def main():
             end = start + chunk_size
             current_chunk = filtered_stocks[start:end]
             part_num = part + 1
-            
+
             message = (
                 f"<b>[{today_et}] 미국주식 고배당 종목 알림 ({total_stocks}건)</b>\n"
                 f"※ 동부시간 기준 {now_et.strftime('%Y-%m-%d %H:%M')}\n"
                 f"※ 최종 매수 기한: 배당락일 2영업일 전까지\n\n"
             )
-            
+
             for idx, stock in enumerate(current_chunk, 1):
                 global_idx = start + idx
                 message += (
@@ -189,7 +198,6 @@ def main():
                     f"├ 현재 가격: {stock['Current Price']}\n"
                     f"├ 배당 수익률: {stock['Dividend Yield']}\n"
                     f"├ 배당금: ${stock['Dividend']} (연간 ${stock['Annual Dividend']})\n"
-                    f"├ 시가총액: {stock['Market Cap']}\n"
                     f"└ 지급일: {stock['Payment Date']}\n\n"
                 )
 
