@@ -1,6 +1,6 @@
 # Dividend Alert Bot 📈🤖
 
-주식 배당락일 고배당 종목을 매일 아침 텔레그램 채널로 알려주는 자동화 봇
+주식 배당락일 이틀전인 고배당 종목을 매일 아침 텔레그램 채널로 알려주는 자동화 봇
 
 [![GitHub Actions](https://github.com/brainer3220/dividend-bot/actions/workflows/dividend.yml/badge.svg)](https://github.com/brainer3220/dividend-bot/actions)
 
