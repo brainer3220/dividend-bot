@@ -9,6 +9,9 @@ import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor
 from requests.adapters import Retry, HTTPAdapter
 
+# 필요한 모듈 임포트 추가
+from pandas.tseries.holiday import USFederalHolidayCalendar
+
 # 환경 변수 검증
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
@@ -78,7 +81,7 @@ def parse_date(date_str):
 def calculate_cutoff_date(ex_date):
     """배당락일 기준 2영업일 전 날짜 계산"""
     try:
-        us_bd = pd.offsets.CustomBusinessDay(calendar=pd.tseries.holiday.USFederalHolidayCalendar())
+        us_bd = pd.offsets.CustomBusinessDay(calendar=USFederalHolidayCalendar())
         cutoff_date = ex_date - us_bd * 2
         return cutoff_date
     except Exception as e:
@@ -121,8 +124,8 @@ def process_stock(stock, current_date):
             price = hist.Close.dropna().iloc[-1]
 
         # 배당 수익률 계산
-        dividend_rate = float(stock['dividend_Rate'])
-        annual_dividend = float(stock['indicated_Annual_Dividend'])
+        dividend_rate = float(stock['dividend_Rate'].replace('$', '').replace(',', ''))
+        annual_dividend = float(stock['indicated_Annual_Dividend'].replace('$', '').replace(',', ''))
         if price > 0:
             dividend_yield = (annual_dividend / price) * 100
         else:
@@ -140,7 +143,6 @@ def process_stock(stock, current_date):
                 'Dividend_Yield_Value': dividend_yield,
                 'Payment Date': stock['payment_Date'],
                 'Current Price': f"${price:.2f}",
-                # 'Market Cap': f"${market_cap/1e9:.2f}B"  # 시가총액 정보 제거
             }
     except Exception as e:
         logging.error(f"종목 처리 오류 {stock.get('symbol')}: {str(e)}")
