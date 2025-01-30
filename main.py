@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 import pandas as pd
 import yfinance as yf
@@ -63,7 +63,12 @@ def fetch_nasdaq_data(date):
     try:
         response = session.get(url, headers=headers, timeout=10)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        if 'data' in data and data['data']:
+            return data
+        else:
+            logging.warning(f"NASDAQ API 응답에 데이터가 없습니다. 날짜: {date}")
+            return None
     except requests.exceptions.RequestException as e:
         logging.error(f"NASDAQ API 요청 실패: {str(e)}")
         return None
@@ -160,8 +165,9 @@ def main():
         # 현재 동부시간 기준 날짜
         now_et = datetime.now(EASTERN_TZ)
 
-        # 배당 데이터를 2일 뒤 날짜로 조회
-        date_to_fetch = now_et + timedelta(days=2)
+        # 2 영업일 뒤 날짜 계산
+        us_bd = pd.offsets.CustomBusinessDay(calendar=USFederalHolidayCalendar())
+        date_to_fetch = now_et + us_bd * 2
         date_to_fetch_str = date_to_fetch.strftime('%Y-%m-%d')
         current_date = date_to_fetch.date()
 
@@ -173,6 +179,14 @@ def main():
 
         # 종목 처리
         rows = data['data'].get('calendar', {}).get('rows', [])
+        if rows is None:
+            logging.warning("배당 데이터의 'rows'가 없습니다.")
+            rows = []
+
+        if not rows:
+            logging.info("배당 종목이 없습니다.")
+            return
+
         with ThreadPoolExecutor(max_workers=10) as executor:
             results = executor.map(lambda s: process_stock(s, current_date), rows)
             filtered_stocks = [res for res in results if res]
