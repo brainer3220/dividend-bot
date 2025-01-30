@@ -164,12 +164,12 @@ def main():
     try:
         # 현재 동부시간 기준 날짜
         now_et = datetime.now(EASTERN_TZ)
+        current_date = now_et.date()
 
         # 2 영업일 뒤 날짜 계산
         us_bd = pd.offsets.CustomBusinessDay(calendar=USFederalHolidayCalendar())
         date_to_fetch = now_et + us_bd * 2
         date_to_fetch_str = date_to_fetch.strftime('%Y-%m-%d')
-        current_date = date_to_fetch.date()
 
         # NASDAQ 데이터 조회
         data = fetch_nasdaq_data(date_to_fetch_str)
