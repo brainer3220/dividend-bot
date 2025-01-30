@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import pandas as pd
 import yfinance as yf
@@ -124,8 +124,15 @@ def process_stock(stock, current_date):
             price = hist.Close.dropna().iloc[-1]
 
         # 배당 수익률 계산
-        dividend_rate = float(stock['dividend_Rate'].replace('$', '').replace(',', ''))
-        annual_dividend = float(stock['indicated_Annual_Dividend'].replace('$', '').replace(',', ''))
+        dividend_rate_str = stock['dividend_Rate'].replace('$', '').replace(',', '')
+        annual_dividend_str = stock['indicated_Annual_Dividend'].replace('$', '').replace(',', '')
+
+        if not dividend_rate_str or not annual_dividend_str:
+            logging.warning(f"배당 금액 데이터 누락: {ticker}")
+            return None
+
+        dividend_rate = float(dividend_rate_str)
+        annual_dividend = float(annual_dividend_str)
         if price > 0:
             dividend_yield = (annual_dividend / price) * 100
         else:
@@ -152,11 +159,14 @@ def main():
     try:
         # 현재 동부시간 기준 날짜
         now_et = datetime.now(EASTERN_TZ)
-        today_et = now_et.strftime('%Y-%m-%d')
-        current_date = now_et.date()
+
+        # 배당 데이터를 2일 뒤 날짜로 조회
+        date_to_fetch = now_et + timedelta(days=2)
+        date_to_fetch_str = date_to_fetch.strftime('%Y-%m-%d')
+        current_date = date_to_fetch.date()
 
         # NASDAQ 데이터 조회
-        data = fetch_nasdaq_data(today_et)
+        data = fetch_nasdaq_data(date_to_fetch_str)
         if not data or not data.get('data'):
             logging.warning("배당 데이터를 가져오지 못했습니다.")
             return
@@ -186,7 +196,7 @@ def main():
             part_num = part + 1
 
             message = (
-                f"<b>[{today_et}] 미국주식 고배당 종목 알림 ({total_stocks}건)</b>\n"
+                f"<b>[{date_to_fetch_str}] 미국주식 고배당 종목 알림 ({total_stocks}건)</b>\n"
                 f"※ 동부시간 기준 {now_et.strftime('%Y-%m-%d %H:%M')}\n"
                 f"※ 최종 매수 기한: 배당락일 2영업일 전까지\n\n"
             )
