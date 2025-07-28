@@ -58,12 +58,29 @@ def fetch_nasdaq_data(query_date):
     session.mount('https://', HTTPAdapter(max_retries=retries))
 
     try:
-        response = session.get(url, headers=headers, timeout=10)
+        response = session.get(url, headers=headers, timeout=15)
         response.raise_for_status()
+        
+        # JSON 파싱 검증
+        json_data = response.json()
+        if not isinstance(json_data, dict):
+            logging.warning(f"NASDAQ API 응답이 dict가 아님 ({query_date}): {type(json_data)}")
+            return None
+            
         logging.info(f"NASDAQ API 조회 성공: {query_date}")
-        return response.json()
+        return json_data
+        
+    except requests.exceptions.Timeout:
+        logging.error(f"NASDAQ API 타임아웃 ({query_date})")
+        return None
     except requests.exceptions.RequestException as e:
         logging.error(f"NASDAQ API 요청 실패 ({query_date}): {str(e)}")
+        return None
+    except ValueError as e:
+        logging.error(f"NASDAQ API JSON 파싱 실패 ({query_date}): {str(e)}")
+        return None
+    except Exception as e:
+        logging.error(f"NASDAQ API 예상치 못한 오류 ({query_date}): {str(e)}")
         return None
 
 def calculate_last_purchase_date(ex_date):
@@ -167,31 +184,51 @@ def process_stock(stock, current_date):
 def fetch_multiple_days_data(start_date, days_ahead=14):
     """여러 날짜의 배당 데이터를 조회하여 통합"""
     all_stocks = []
+    successful_queries = 0
     
     for i in range(days_ahead):
         query_date = (start_date + timedelta(days=i)).strftime('%Y-%m-%d')
         logging.info(f"배당 데이터 조회 중: {query_date}")
         
-        data = fetch_nasdaq_data(query_date)
-        if data and data.get('data'):
-            calendar_data = data['data'].get('calendar', {})
-            if calendar_data and isinstance(calendar_data, dict):
-                rows = calendar_data.get('rows', [])
-                # None 체크와 빈 리스트 기본값 보장
-                if rows is None:
-                    rows = []
-                elif not isinstance(rows, list):
-                    logging.warning(f"{query_date}: rows가 리스트가 아님 - {type(rows)}")
-                    rows = []
+        try:
+            data = fetch_nasdaq_data(query_date)
+            if not data:
+                logging.warning(f"{query_date}: API 응답 없음")
+                continue
                 
+            # API 응답 구조 디버깅
+            logging.debug(f"{query_date}: API 응답 구조 - {list(data.keys()) if isinstance(data, dict) else type(data)}")
+            
+            if not data.get('data'):
+                logging.warning(f"{query_date}: 'data' 필드 없음")
+                continue
+                
+            calendar_data = data['data'].get('calendar')
+            if not calendar_data:
+                logging.warning(f"{query_date}: 'calendar' 필드 없음")
+                continue
+                
+            rows = calendar_data.get('rows')
+            if rows is None:
+                logging.warning(f"{query_date}: 'rows' 필드가 None")
+                continue
+                
+            if not isinstance(rows, list):
+                logging.warning(f"{query_date}: 'rows'가 리스트가 아님 - {type(rows)}")
+                continue
+                
+            if rows:  # 빈 리스트가 아닌 경우만
                 all_stocks.extend(rows)
                 logging.info(f"{query_date}: {len(rows)}개 종목 발견")
+                successful_queries += 1
             else:
-                logging.warning(f"{query_date}: calendar 데이터가 없거나 올바르지 않음")
-        else:
-            logging.warning(f"{query_date}: API 응답 데이터가 없음")
+                logging.info(f"{query_date}: 배당 데이터 없음")
+                
+        except Exception as e:
+            logging.error(f"{query_date}: 데이터 처리 오류 - {str(e)}")
+            continue
     
-    logging.info(f"총 {len(all_stocks)}개 종목 데이터 수집 완료")
+    logging.info(f"총 {len(all_stocks)}개 종목 데이터 수집 완료 ({successful_queries}/{days_ahead} 성공)")
     return all_stocks
 
 def main():
@@ -207,12 +244,12 @@ def main():
         all_dividend_stocks = fetch_multiple_days_data(now_et, days_ahead=14)
         
         if not all_dividend_stocks:
-            logging.warning("배당 데이터를 가져오지 못했습니다.")
-            # 빈 데이터에 대한 알림 메시지 전송
+            logging.warning("조회한 모든 날짜에서 배당 데이터를 찾을 수 없습니다.")
             message = (
                 f"<b>[{current_time_str} ET] 미국주식 고배당 종목 알림</b>\n\n"
-                f"⚠️ NASDAQ API에서 배당 데이터를 가져오지 못했습니다.\n"
-                f"나중에 다시 시도해주세요."
+                f"⚠️ 현재 NASDAQ에서 배당 데이터를 조회할 수 없습니다.\n"
+                f"• API 응답 오류이거나 해당 기간에 배당 종목이 없을 수 있습니다.\n"
+                f"• 잠시 후 다시 시도해주세요."
             )
             send_telegram(message)
             return
@@ -247,8 +284,7 @@ def main():
             message = (
                 f"<b>[{current_time_str} ET] 미국주식 고배당 종목 알림</b>\n\n"
                 f"현재 조건에 맞는 고배당 종목이 없습니다.\n"
-                f"(배당수익률 3% 이상, 매수 여유시간 1일 이상)\n\n"
-                f"📊 총 {len(all_dividend_stocks)}개 종목 검토함"
+                f"(배당수익률 3% 이상, 매수 여유시간 1일 이상)"
             )
             send_telegram(message)
             return
