@@ -174,9 +174,22 @@ def fetch_multiple_days_data(start_date, days_ahead=14):
         
         data = fetch_nasdaq_data(query_date)
         if data and data.get('data'):
-            rows = data['data'].get('calendar', {}).get('rows', [])
-            all_stocks.extend(rows)
-            logging.info(f"{query_date}: {len(rows)}개 종목 발견")
+            calendar_data = data['data'].get('calendar', {})
+            if calendar_data and isinstance(calendar_data, dict):
+                rows = calendar_data.get('rows', [])
+                # None 체크와 빈 리스트 기본값 보장
+                if rows is None:
+                    rows = []
+                elif not isinstance(rows, list):
+                    logging.warning(f"{query_date}: rows가 리스트가 아님 - {type(rows)}")
+                    rows = []
+                
+                all_stocks.extend(rows)
+                logging.info(f"{query_date}: {len(rows)}개 종목 발견")
+            else:
+                logging.warning(f"{query_date}: calendar 데이터가 없거나 올바르지 않음")
+        else:
+            logging.warning(f"{query_date}: API 응답 데이터가 없음")
     
     logging.info(f"총 {len(all_stocks)}개 종목 데이터 수집 완료")
     return all_stocks
@@ -195,6 +208,13 @@ def main():
         
         if not all_dividend_stocks:
             logging.warning("배당 데이터를 가져오지 못했습니다.")
+            # 빈 데이터에 대한 알림 메시지 전송
+            message = (
+                f"<b>[{current_time_str} ET] 미국주식 고배당 종목 알림</b>\n\n"
+                f"⚠️ NASDAQ API에서 배당 데이터를 가져오지 못했습니다.\n"
+                f"나중에 다시 시도해주세요."
+            )
+            send_telegram(message)
             return
 
         logging.info(f"총 {len(all_dividend_stocks)}개 종목 처리 시작")
@@ -227,7 +247,8 @@ def main():
             message = (
                 f"<b>[{current_time_str} ET] 미국주식 고배당 종목 알림</b>\n\n"
                 f"현재 조건에 맞는 고배당 종목이 없습니다.\n"
-                f"(배당수익률 3% 이상, 매수 여유시간 1일 이상)"
+                f"(배당수익률 3% 이상, 매수 여유시간 1일 이상)\n\n"
+                f"📊 총 {len(all_dividend_stocks)}개 종목 검토함"
             )
             send_telegram(message)
             return
