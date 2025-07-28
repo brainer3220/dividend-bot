@@ -196,16 +196,27 @@ def fetch_multiple_days_data(start_date, days_ahead=14):
                 logging.warning(f"{query_date}: API 응답 없음")
                 continue
                 
-            # API 응답 구조 디버깅
-            logging.debug(f"{query_date}: API 응답 구조 - {list(data.keys()) if isinstance(data, dict) else type(data)}")
-            
-            if not data.get('data'):
+            # API 응답 구조 안전하게 접근
+            if not isinstance(data, dict):
+                logging.warning(f"{query_date}: API 응답이 dict가 아님 - {type(data)}")
+                continue
+                
+            data_section = data.get('data')
+            if not data_section:
                 logging.warning(f"{query_date}: 'data' 필드 없음")
                 continue
                 
-            calendar_data = data['data'].get('calendar')
+            if not isinstance(data_section, dict):
+                logging.warning(f"{query_date}: 'data' 필드가 dict가 아님 - {type(data_section)}")
+                continue
+                
+            calendar_data = data_section.get('calendar')
             if not calendar_data:
                 logging.warning(f"{query_date}: 'calendar' 필드 없음")
+                continue
+                
+            if not isinstance(calendar_data, dict):
+                logging.warning(f"{query_date}: 'calendar' 필드가 dict가 아님 - {type(calendar_data)}")
                 continue
                 
             rows = calendar_data.get('rows')
@@ -217,15 +228,26 @@ def fetch_multiple_days_data(start_date, days_ahead=14):
                 logging.warning(f"{query_date}: 'rows'가 리스트가 아님 - {type(rows)}")
                 continue
                 
-            if rows:  # 빈 리스트가 아닌 경우만
-                all_stocks.extend(rows)
-                logging.info(f"{query_date}: {len(rows)}개 종목 발견")
-                successful_queries += 1
+            if len(rows) > 0:  # 빈 리스트가 아닌 경우만
+                # rows의 각 항목이 dict인지 확인
+                valid_rows = []
+                for row in rows:
+                    if isinstance(row, dict):
+                        valid_rows.append(row)
+                    else:
+                        logging.warning(f"{query_date}: 잘못된 row 타입 - {type(row)}")
+                
+                if valid_rows:
+                    all_stocks.extend(valid_rows)
+                    logging.info(f"{query_date}: {len(valid_rows)}개 유효한 종목 발견")
+                    successful_queries += 1
+                else:
+                    logging.warning(f"{query_date}: 유효한 종목 데이터 없음")
             else:
-                logging.info(f"{query_date}: 배당 데이터 없음")
+                logging.info(f"{query_date}: 배당 데이터 없음 (빈 배열)")
                 
         except Exception as e:
-            logging.error(f"{query_date}: 데이터 처리 오류 - {str(e)}")
+            logging.error(f"{query_date}: 데이터 처리 중 예상치 못한 오류 - {str(e)}")
             continue
     
     logging.info(f"총 {len(all_stocks)}개 종목 데이터 수집 완료 ({successful_queries}/{days_ahead} 성공)")
