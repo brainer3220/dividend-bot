@@ -15,6 +15,7 @@ on:
           - backtest
           - optimize
           - monte_carlo
+          - profile
       start_date:
         description: 'Start date for backtest/optimize (YYYY-MM-DD)'
         required: false
@@ -75,7 +76,7 @@ jobs:
           --mode ${{ github.event.inputs.mode }} \
           --start ${{ github.event.inputs.start_date }} \
           --end ${{ github.event.inputs.end_date }} \
-          ${{ github.event.inputs.notify == 'true' && '--notify' || '' }} \
+          ${{ fromJSON(github.event.inputs.notify) && '--notify' || '' }} \
           --output-dir ./checkpoints
 
     - name: Upload artifacts
