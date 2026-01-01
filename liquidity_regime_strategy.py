@@ -362,7 +362,10 @@ def build_configs(args: argparse.Namespace, config_dict: Optional[Dict[str, obje
     return dcfg, fcfg, base_scfg, base_tcfg, base_ccfg, base_pcfg, cvcfg, spcfg
 
 
-def load_best_params_from_cv(dcfg: DataConfig) -> TrialParams:
+def load_best_params_from_cv(
+    dcfg: DataConfig,
+    fallback_params: Optional[TrialParams] = None,
+) -> TrialParams:
     def _trial_params_from_dict(best: Dict[str, object], prefix: str = "param_") -> TrialParams:
         key = lambda name: f"{prefix}{name}" if prefix else name
         try:
@@ -382,6 +385,7 @@ def load_best_params_from_cv(dcfg: DataConfig) -> TrialParams:
         except KeyError as exc:  # pragma: no cover - defensive guard
             raise RuntimeError(f"Best params missing required key: {exc.args[0]}") from exc
 
+    _safe_mkdir(dcfg.checkpoint_dir)
     cv_path = os.path.join(dcfg.checkpoint_dir, "cv_results.csv")
     if not os.path.exists(cv_path):
         stats_path = os.path.join(dcfg.checkpoint_dir, "final_stats.json")
@@ -391,6 +395,11 @@ def load_best_params_from_cv(dcfg: DataConfig) -> TrialParams:
             best_params = stats.get("best_params")
             if best_params:
                 return _trial_params_from_dict(best_params, prefix="")
+        if fallback_params is not None:
+            logging.getLogger("liquidity_strategy_v2").warning(
+                "cv_results.csv not found at %s; using fallback params from config.", cv_path
+            )
+            return fallback_params
         raise RuntimeError(
             "cv_results.csv not found and no cached best_params available. "
             "Run in optimize mode first to generate checkpoints."
@@ -400,6 +409,28 @@ def load_best_params_from_cv(dcfg: DataConfig) -> TrialParams:
         raise RuntimeError("cv_results.csv is empty")
     best = df.iloc[0].to_dict()
     return _trial_params_from_dict(best, prefix="param_")
+
+
+def default_params_from_configs(
+    fcfg: FeatureConfig,
+    base_scfg: BaseSignalConfig,
+    base_tcfg: BaseTrendConfig,
+    base_ccfg: BaseCrashConfig,
+    base_pcfg: PortfolioConfig,
+) -> TrialParams:
+    return TrialParams(
+        zwin=int(fcfg.zwin),
+        smooth_span=int(fcfg.smooth_span),
+        threshold=float(base_scfg.threshold),
+        hysteresis=float(base_scfg.hysteresis),
+        cooldown_weeks=int(base_scfg.cooldown_weeks),
+        trend_win=int(base_tcfg.trend_win),
+        use_trend_slope=1 if base_tcfg.use_slope_filter else 0,
+        crash_enabled=1 if base_ccfg.enabled else 0,
+        crash_ret=float(base_ccfg.crash_ret),
+        crash_lock_weeks=int(base_ccfg.lock_weeks),
+        risk_off_spy=float(base_pcfg.risk_off_spy),
+    )
 
 
 def get_notification_config(
@@ -2337,6 +2368,7 @@ def main() -> None:
     logger = setup_logger(dcfg.log_dir)
     _safe_mkdir(dcfg.cache_dir)
     _safe_mkdir(dcfg.checkpoint_dir)
+    fallback_params = default_params_from_configs(fcfg, base_scfg, base_tcfg, base_ccfg, base_pcfg)
 
     if fcfg.use_multi_timeframe:
         logger.info("Multi-timeframe LCI enabled; zwin/smooth grid params are ignored for LCI.")
@@ -2458,7 +2490,7 @@ def main() -> None:
             return
 
         if args.mode == "live":
-            best_params = load_best_params_from_cv(dcfg)
+            best_params = load_best_params_from_cv(dcfg, fallback_params=fallback_params)
             logger.info("Running live signal generation...")
             out_live, prices_live, signal = generate_live_state(
                 dcfg,
@@ -2493,7 +2525,7 @@ def main() -> None:
             return
 
         if args.mode == "monte_carlo":
-            best_params = load_best_params_from_cv(dcfg)
+            best_params = load_best_params_from_cv(dcfg, fallback_params=fallback_params)
             logger.info(f"Running Monte Carlo robustness test ({args.mc_sims} sims)...")
             fred_a, prices_a = load_and_align_data(dcfg, fcfg, logger)
             mc_results = monte_carlo_robustness(
