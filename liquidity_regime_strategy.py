@@ -363,26 +363,43 @@ def build_configs(args: argparse.Namespace, config_dict: Optional[Dict[str, obje
 
 
 def load_best_params_from_cv(dcfg: DataConfig) -> TrialParams:
+    def _trial_params_from_dict(best: Dict[str, object], prefix: str = "param_") -> TrialParams:
+        key = lambda name: f"{prefix}{name}" if prefix else name
+        try:
+            return TrialParams(
+                zwin=int(best[key("zwin")]),
+                smooth_span=int(best[key("smooth_span")]),
+                threshold=float(best[key("threshold")]),
+                hysteresis=float(best[key("hysteresis")]),
+                cooldown_weeks=int(best[key("cooldown_weeks")]),
+                trend_win=int(best[key("trend_win")]),
+                use_trend_slope=int(best[key("use_trend_slope")]),
+                crash_enabled=int(best[key("crash_enabled")]),
+                crash_ret=float(best[key("crash_ret")]),
+                crash_lock_weeks=int(best[key("crash_lock_weeks")]),
+                risk_off_spy=float(best[key("risk_off_spy")]),
+            )
+        except KeyError as exc:  # pragma: no cover - defensive guard
+            raise RuntimeError(f"Best params missing required key: {exc.args[0]}") from exc
+
     cv_path = os.path.join(dcfg.checkpoint_dir, "cv_results.csv")
     if not os.path.exists(cv_path):
-        raise RuntimeError(f"cv_results.csv not found: {cv_path}")
+        stats_path = os.path.join(dcfg.checkpoint_dir, "final_stats.json")
+        if os.path.exists(stats_path):
+            with open(stats_path, "r", encoding="utf-8") as f:
+                stats = json.load(f)
+            best_params = stats.get("best_params")
+            if best_params:
+                return _trial_params_from_dict(best_params, prefix="")
+        raise RuntimeError(
+            "cv_results.csv not found and no cached best_params available. "
+            "Run in optimize mode first to generate checkpoints."
+        )
     df = pd.read_csv(cv_path)
     if df.empty:
         raise RuntimeError("cv_results.csv is empty")
     best = df.iloc[0].to_dict()
-    return TrialParams(
-        zwin=int(best["param_zwin"]),
-        smooth_span=int(best["param_smooth_span"]),
-        threshold=float(best["param_threshold"]),
-        hysteresis=float(best["param_hysteresis"]),
-        cooldown_weeks=int(best["param_cooldown_weeks"]),
-        trend_win=int(best["param_trend_win"]),
-        use_trend_slope=int(best["param_use_trend_slope"]),
-        crash_enabled=int(best["param_crash_enabled"]),
-        crash_ret=float(best["param_crash_ret"]),
-        crash_lock_weeks=int(best["param_crash_lock_weeks"]),
-        risk_off_spy=float(best["param_risk_off_spy"]),
-    )
+    return _trial_params_from_dict(best, prefix="param_")
 
 
 def get_notification_config(
