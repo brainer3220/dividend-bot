@@ -35,6 +35,9 @@ on:
 jobs:
   run-strategy:
     runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
 
     steps:
     - name: Checkout code
