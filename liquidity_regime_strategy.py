@@ -362,27 +362,82 @@ def build_configs(args: argparse.Namespace, config_dict: Optional[Dict[str, obje
     return dcfg, fcfg, base_scfg, base_tcfg, base_ccfg, base_pcfg, cvcfg, spcfg
 
 
-def load_best_params_from_cv(dcfg: DataConfig) -> TrialParams:
+def load_best_params_from_cv(
+    dcfg: DataConfig,
+    fcfg: FeatureConfig,
+    base_scfg: BaseSignalConfig,
+    base_tcfg: BaseTrendConfig,
+    base_ccfg: BaseCrashConfig,
+    base_pcfg: PortfolioConfig,
+) -> TrialParams:
+    def _trial_params_from_dict(
+        best: Dict[str, object],
+        default_params: TrialParams,
+        prefix: str = "param_",
+    ) -> TrialParams:
+        key = lambda name: f"{prefix}{name}" if prefix else name
+        try:
+            return TrialParams(
+                zwin=int(best[key("zwin")]),
+                smooth_span=int(best[key("smooth_span")]),
+                threshold=float(best[key("threshold")]),
+                hysteresis=float(best[key("hysteresis")]),
+                cooldown_weeks=int(best[key("cooldown_weeks")]),
+                trend_win=int(best[key("trend_win")]),
+                use_trend_slope=int(best[key("use_trend_slope")]),
+                crash_enabled=int(best[key("crash_enabled")]),
+                crash_ret=float(best[key("crash_ret")]),
+                crash_lock_weeks=int(best[key("crash_lock_weeks")]),
+                risk_off_spy=float(best[key("risk_off_spy")]),
+            )
+        except KeyError as exc:  # pragma: no cover - defensive guard
+            logging.warning(
+                "Best params missing required key %s; falling back to default config.",
+                exc.args[0],
+            )
+            return default_params
+
+    def _default_trial_params() -> TrialParams:
+        return TrialParams(
+            zwin=int(fcfg.zwin),
+            smooth_span=int(fcfg.smooth_span),
+            threshold=float(base_scfg.threshold),
+            hysteresis=float(base_scfg.hysteresis),
+            cooldown_weeks=int(base_scfg.cooldown_weeks),
+            trend_win=int(base_tcfg.trend_win),
+            use_trend_slope=int(bool(base_tcfg.use_slope_filter)),
+            crash_enabled=int(bool(base_ccfg.enabled)),
+            crash_ret=float(base_ccfg.crash_ret),
+            crash_lock_weeks=int(base_ccfg.lock_weeks),
+            risk_off_spy=float(base_pcfg.risk_off_spy),
+        )
+
+    default_params = _default_trial_params()
+    os.makedirs(dcfg.checkpoint_dir, exist_ok=True)
+
     cv_path = os.path.join(dcfg.checkpoint_dir, "cv_results.csv")
-    if not os.path.exists(cv_path):
-        raise RuntimeError(f"cv_results.csv not found: {cv_path}")
-    df = pd.read_csv(cv_path)
-    if df.empty:
-        raise RuntimeError("cv_results.csv is empty")
-    best = df.iloc[0].to_dict()
-    return TrialParams(
-        zwin=int(best["param_zwin"]),
-        smooth_span=int(best["param_smooth_span"]),
-        threshold=float(best["param_threshold"]),
-        hysteresis=float(best["param_hysteresis"]),
-        cooldown_weeks=int(best["param_cooldown_weeks"]),
-        trend_win=int(best["param_trend_win"]),
-        use_trend_slope=int(best["param_use_trend_slope"]),
-        crash_enabled=int(best["param_crash_enabled"]),
-        crash_ret=float(best["param_crash_ret"]),
-        crash_lock_weeks=int(best["param_crash_lock_weeks"]),
-        risk_off_spy=float(best["param_risk_off_spy"]),
+    if os.path.exists(cv_path):
+        df = pd.read_csv(cv_path)
+        if df.empty:
+            logging.warning("cv_results.csv is empty; using default parameters from config.")
+            return default_params
+        best = df.iloc[0].to_dict()
+        return _trial_params_from_dict(best, default_params, prefix="param_")
+
+    stats_path = os.path.join(dcfg.checkpoint_dir, "final_stats.json")
+    if os.path.exists(stats_path):
+        with open(stats_path, "r", encoding="utf-8") as f:
+            stats = json.load(f)
+        best_params = stats.get("best_params")
+        if best_params:
+            return _trial_params_from_dict(best_params, default_params, prefix="")
+        logging.warning("final_stats.json present but missing best_params; using default parameters.")
+
+    logging.warning(
+        "cv_results.csv not found at %s and no cached best_params available; using default parameters.",
+        cv_path,
     )
+    return default_params
 
 
 def get_notification_config(
@@ -2441,7 +2496,7 @@ def main() -> None:
             return
 
         if args.mode == "live":
-            best_params = load_best_params_from_cv(dcfg)
+            best_params = load_best_params_from_cv(dcfg, fcfg, base_scfg, base_tcfg, base_ccfg, base_pcfg)
             logger.info("Running live signal generation...")
             out_live, prices_live, signal = generate_live_state(
                 dcfg,
@@ -2476,7 +2531,7 @@ def main() -> None:
             return
 
         if args.mode == "monte_carlo":
-            best_params = load_best_params_from_cv(dcfg)
+            best_params = load_best_params_from_cv(dcfg, fcfg, base_scfg, base_tcfg, base_ccfg, base_pcfg)
             logger.info(f"Running Monte Carlo robustness test ({args.mc_sims} sims)...")
             fred_a, prices_a = load_and_align_data(dcfg, fcfg, logger)
             mc_results = monte_carlo_robustness(
