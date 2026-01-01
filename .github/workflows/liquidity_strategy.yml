@@ -1,0 +1,89 @@
+name: Liquidity Strategy
+
+on:
+  schedule:
+    - cron: '0 21 * * 5'  # 매주 금요일 UTC 21:00 (한국 시간 토요일 오전 6시)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Execution mode'
+        required: true
+        default: 'live'
+        type: choice
+        options:
+          - live
+          - backtest
+          - optimize
+          - monte_carlo
+      start_date:
+        description: 'Start date for backtest/optimize (YYYY-MM-DD)'
+        required: false
+        default: '2005-01-01'
+        type: string
+      end_date:
+        description: 'End date for backtest/optimize (YYYY-MM-DD)'
+        required: false
+        default: '2025-12-31'
+        type: string
+      notify:
+        description: 'Enable Telegram notifications'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  run-strategy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Cache data directory
+      uses: actions/cache@v4
+      with:
+        path: ./cache
+        key: ${{ runner.os }}-liquidity-data-${{ hashFiles('**/liquidity_regime_strategy.py') }}
+        restore-keys: |
+          ${{ runner.os }}-liquidity-data-
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Run liquidity strategy (scheduled)
+      if: github.event_name == 'schedule'
+      env:
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        python liquidity_regime_strategy.py --mode live --notify
+
+    - name: Run liquidity strategy (manual)
+      if: github.event_name == 'workflow_dispatch'
+      env:
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        python liquidity_regime_strategy.py \
+          --mode ${{ github.event.inputs.mode }} \
+          --start ${{ github.event.inputs.start_date }} \
+          --end ${{ github.event.inputs.end_date }} \
+          ${{ github.event.inputs.notify == 'true' && '--notify' || '' }} \
+          --output-dir ./checkpoints
+
+    - name: Upload artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: strategy-results-${{ github.run_number }}
+        path: |
+          ./checkpoints/
+          ./logs/
+        retention-days: 30

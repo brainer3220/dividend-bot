@@ -1,0 +1,143 @@
+# 경제 유동성 지표 분석 전략 설정 예시
+# liquidity_regime_strategy.py --config config.yaml 로 사용
+
+# 데이터 설정
+data:
+  start: "2005-01-01"
+  end: "2025-12-31"
+  
+  cache_dir: "./cache"
+  checkpoint_dir: "./checkpoints"
+  log_dir: "./logs"
+  
+  # FRED 경제 지표
+  fred_indicators:
+    - "WALCL"      # Federal Reserve Total Assets
+    - "WRESBAL"    # Reserve Balances
+    - "RRPONTSYD"  # Reverse Repo
+    - "M2SL"       # M2 Money Supply
+  
+  # 자산 목록 (포트폴리오 가중치와 동일한 순서 유지)
+  assets:
+    - "SPY"        # S&P 500 ETF
+    - "BIL"        # Short-term Treasury
+    - "GLD"        # Gold ETF
+    - "BTC-USD"    # Bitcoin
+
+# 피처 엔지니어링 설정
+feature:
+  freq: "W-FRI"              # 주간 금요일 리샘플링
+  transform: "diff"          # "diff" 또는 "pct" (변화량 vs 변화율)
+  zwin: 52                   # Z-score 계산 윈도우 (주)
+  smooth_span: 8             # 평활화 스팬
+  clip_z: 6.0                # Z-score 클리핑
+  ffill_limit: 2             # Forward fill 제한
+  use_multi_timeframe: false # 다중 타임프레임 LCI 사용 여부
+  multi_zwin: [26, 52, 104]  # 다중 Z-score 윈도우
+  multi_smooth: [4, 8, 12]   # 다중 평활화 스팬
+  multi_agg: "mean"          # 다중 타임프레임 집계 방법
+
+# 시그널 생성 설정
+signal:
+  threshold: 0.0             # LCI 임계값
+  hysteresis: 0.2            # 히스테리시스 (레짐 전환 안정화)
+  cooldown_weeks: 8          # 레짐 전환 후 최소 대기 기간 (주)
+  adaptive: false            # 적응형 임계값 사용 여부
+  adaptive_lookback: 52      # 적응형 임계값 룩백 기간
+  adaptive_k: 0.5            # 적응형 임계값 계수
+
+# 추세 필터 설정
+trend:
+  trend_ticker: "SPY"        # 추세 필터 대상 자산
+  trend_win: 40              # 추세 이동평균 윈도우 (주)
+  use_slope_filter: false    # 이동평균 기울기 필터 사용 여부
+
+# 급락 감지 설정
+crash:
+  enabled: false             # 급락 감지 활성화 여부
+  crash_ret: -0.07           # 급락 기준 수익률 (-7%)
+  lock_weeks: 8              # 급락 후 강제 Risk-off 기간 (주)
+  consecutive_threshold: 3   # 연속 급락 횟수 임계값
+
+# 포트폴리오 가중치 설정
+portfolio:
+  # Risk-on 가중치 (SPY, BIL, GLD, BTC-USD 순서)
+  w_risk_on: [0.80, 0.10, 0.10, 0.00]
+  
+  # Risk-off 가중치 (개별 지정, 나머지는 BIL로 채움)
+  risk_off_spy: 0.20         # SPY 비중
+  risk_off_gld: 0.15         # GLD 비중
+  risk_off_btc: 0.00         # BTC 비중
+  
+  fee_bps: 2.0               # 거래 수수료 (basis points)
+  slippage_bps: 5.0          # 슬리피지 (basis points)
+  fee_by_asset: null         # 자산별 수수료 (옵션)
+
+# 교차 검증 설정
+cv:
+  n_splits: 5                # CV 폴드 수
+  min_train_weeks: 156       # 최소 훈련 기간 (주)
+  min_val_weeks: 26          # 최소 검증 기간 (주)
+  
+  # 점수 가중치 (worst-fold 기반)
+  w_sharpe: 1.0              # Sharpe ratio 가중치
+  w_calmar: 0.5              # Calmar ratio 가중치
+  w_switch: 0.10             # 레짐 전환 빈도 패널티
+  w_worst_dd: 0.25           # 최대 낙폭 패널티
+  
+  sort_by: "Score"           # 정렬 기준
+  batch_size: 100            # 배치 크기
+  max_workers: 1             # 병렬 작업 수
+  use_process_pool: false    # 프로세스 풀 사용 여부
+  use_staged_search: false   # 단계별 그리드 탐색 사용 여부
+
+# 그리드 탐색 공간 설정
+search:
+  # LCI 파라미터
+  zwin_grid: [26, 52, 78]
+  smooth_grid: [4, 8, 12]
+  threshold_grid: [-0.25, 0.0, 0.25]
+  
+  # 레짐 안정화
+  hysteresis_grid: [0.1, 0.2]
+  cooldown_grid: [0, 8]
+  
+  # 추세 필터
+  trend_win_grid: [20, 40]
+  trend_slope_grid: [0, 1]    # 0: 미사용, 1: 사용
+  
+  # 급락 감지
+  crash_enable_grid: [0, 1]   # 0: 비활성화, 1: 활성화
+  crash_ret_grid: [-0.07]
+  crash_lock_grid: [8]
+  
+  # Risk-off SPY 비중 탐색
+  risk_off_spy_grid: [0.00, 0.05, 0.10]
+
+# 텔레그램 알림 설정
+notifications:
+  enabled: true               # 알림 활성화 여부
+  
+  rules:
+    # 레짐 변경 알림
+    regime_change:
+      enabled: true
+    
+    # 급락 감지 알림
+    crash_detected:
+      enabled: true
+    
+    # 주간 성과 리포트
+    weekly_report:
+      enabled: true
+      min_weeks: 4            # 최소 누적 기간
+    
+    # 전략 건전성 경고
+    health_warning:
+      enabled: true
+      sharpe_threshold: 0.5   # Sharpe ratio 임계값
+      dd_threshold: -0.15     # 최대 낙폭 임계값
+    
+    # 최적화 완료 알림
+    optimization_complete:
+      enabled: true

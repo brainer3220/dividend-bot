@@ -1,2 +1,9 @@
 yfinance
 requests
+pandas
+numpy
+pandas_datareader
+tqdm
+pyarrow
+pyyaml
+scipy
